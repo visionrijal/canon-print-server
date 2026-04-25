@@ -586,23 +586,62 @@ class IPPHandler:
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def get_wifi_ip():
+    """
+    Try every available network interface to find a non-loopback IPv4 address.
+    Android phones may use wlan0, wlan1, wlan2, rmnet_data0, etc. depending
+    on the ROM — never assume wlan0.
+    """
+    # Method 1: parse 'ip addr' for all interfaces, prefer wlan* addresses
     try:
-        result = subprocess.run(
-            ['ip', 'addr', 'show', 'wlan0'],
-            capture_output=True, text=True
-        )
+        result = subprocess.run(['ip', 'addr'], capture_output=True, text=True)
+        wlan_ip   = None
+        other_ip  = None
+        iface     = ''
         for line in result.stdout.splitlines():
             line = line.strip()
+            if line and line[0].isdigit():          # interface header line
+                iface = line.split(':')[1].strip() if ':' in line else ''
             if line.startswith('inet ') and '127.' not in line:
-                return line.split()[1].split('/')[0]
-    except Exception:
-        pass
+                ip = line.split()[1].split('/')[0]
+                if iface.startswith('wlan'):
+                    wlan_ip = ip
+                elif not iface.startswith('lo'):
+                    other_ip = ip
+        if wlan_ip:
+            return wlan_ip
+        if other_ip:
+            return other_ip
+    except Exception as e:
+        log.debug(f"ip addr parse failed: {e}")
+
+    # Method 2: UDP connect trick — OS picks the right source address
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect(('8.8.8.8', 80))
-        return s.getsockname()[0]
-    except Exception:
-        return '0.0.0.0'
+        ip = s.getsockname()[0]
+        s.close()
+        if not ip.startswith('127.'):
+            return ip
+    except Exception as e:
+        log.debug(f"UDP connect trick failed: {e}")
+
+    return '0.0.0.0'
+
+
+def bind_server(server, preferred_port):
+    """
+    Try to bind to preferred_port (631). If that fails for any reason
+    (PermissionError on non-rooted, OSError if CUPS already holds it, etc.)
+    fall back to 6310. Returns the port actually bound.
+    """
+    for port in (preferred_port, 6310, 16310):
+        try:
+            server.bind(('0.0.0.0', port))
+            return port
+        except OSError as e:
+            log.warning(f"Cannot bind port {port}: {e}")
+    log.error("Could not bind to any port. Is another instance running?")
+    sys.exit(1)
 
 
 def main():
@@ -616,27 +655,25 @@ def main():
     log.info("Printer opened successfully.")
 
     wifi_ip = get_wifi_ip()
-    port    = 631
+    log.info(f"WiFi IP: {wifi_ip}")
+    if wifi_ip == '0.0.0.0':
+        log.warning("Could not detect WiFi IP. Is WiFi connected?")
+        log.warning("Run 'ip addr' to find your IP, then use it manually.")
 
-    log.info(f"WiFi IP   : {wifi_ip}")
-    log.info(f"Printer   : ipp://{wifi_ip}:{port}/printers/LBP2900")
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    port = bind_server(server, 631)
+
+    if port != 631:
+        log.warning(f"Using fallback port {port} — update printer URL on other devices.")
+
+    log.info(f"Printer URI: ipp://{wifi_ip}:{port}/printers/LBP2900")
     log.info("")
     log.info("Add printer on other devices:")
     log.info(f"  Windows : http://{wifi_ip}:{port}/printers/LBP2900")
     log.info(f"  Linux   : lpadmin -p LBP2900 -v ipp://{wifi_ip}:{port}/printers/LBP2900 -E")
     log.info(f"  Android : NokoPrint > Network > IPP > {wifi_ip}:{port}/printers/LBP2900")
     log.info("")
-
-    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-
-    try:
-        server.bind(('0.0.0.0', port))
-    except PermissionError:
-        log.warning(f"Port {port} requires root — falling back to port 6310.")
-        log.warning(f"Use ipp://{wifi_ip}:6310/printers/LBP2900 on other devices.")
-        port = 6310
-        server.bind(('0.0.0.0', port))
 
     server.listen(10)
     log.info(f"IPP server listening on 0.0.0.0:{port} — waiting for print jobs...")
