@@ -179,40 +179,27 @@ fi
 # Ensure CUPS run directory exists
 mkdir -p "$PREFIX/var/run/cups"
 
-cat > "$CUPS_CONF" << EOF
+cat > $PREFIX/etc/cups/cupsd.conf << EOF
 LogLevel warn
-PageLogFormat
 MaxLogSize 0
 ErrorPolicy retry-job
 
-Listen 0.0.0.0:631
-Listen ${PREFIX}/var/run/cups/cups.sock
+Listen 0.0.0.0:6310
+Listen $PREFIX/var/run/cups/cups.sock
 
-Browsing Yes
-BrowseLocalProtocols dnssd
-BrowseWebIF Yes
+Browsing No
 
 DefaultAuthType Basic
 WebInterface Yes
 
 <Location />
   Order allow,deny
-  Allow from @LOCAL
-  Allow from localhost
+  Allow all
 </Location>
 
 <Location /admin>
   Order allow,deny
-  Allow from @LOCAL
-  Allow from localhost
-</Location>
-
-<Location /admin/conf>
-  AuthType Default
-  Require user @SYSTEM
-  Order allow,deny
-  Allow from @LOCAL
-  Allow from localhost
+  Allow all
 </Location>
 EOF
 
