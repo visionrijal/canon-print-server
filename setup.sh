@@ -158,7 +158,6 @@ cd "$INSTALL_DIR"
 # --- Install the print server script ------------------------------------------
 
 log "Installing print_server.py..."
-cp "$(dirname "$0")/print_server.py" "$INSTALL_DIR/print_server.py"
 chmod +x "$INSTALL_DIR/print_server.py"
 
 # --- Configure CUPS -----------------------------------------------------------
