@@ -38,8 +38,8 @@ uses internally, but open source.
 
 ```bash
 # 1. Clone this repo in Termux
-git clone https://github.com/YOUR_USERNAME/canon-termux-print
-cd canon-termux-print
+git clone https://github.com/visionrijal/canon-print-server
+cd canon-print-server
 
 # 2. Run setup
 chmod +x setup.sh
