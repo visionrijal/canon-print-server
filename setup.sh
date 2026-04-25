@@ -201,7 +201,24 @@ LOG="$INSTALL_DIR/server.log"
 echo "[$(date)] Starting Canon print server..." | tee -a "$LOG"
 
 # Find printer USB device
-USB_DEVICE=$(ls /dev/bus/usb/*/* 2>/dev/null | head -1)
+# Find Canon printer (VendorID 04a9) specifically, skip root hub (001/001)
+USB_DEVICE=""
+for dev in /dev/bus/usb/*/*; do
+    # Read idVendor from sysfs
+    bus=$(echo "$dev" | awk -F/ '{print $5}')
+    devnum=$(echo "$dev" | awk -F/ '{print $6}')
+    vendor=$(cat /sys/bus/usb/devices/usb${bus}/${bus}-*/idVendor 2>/dev/null | head -1)
+    if [ "$vendor" = "04a9" ]; then
+        USB_DEVICE="$dev"
+        break
+    fi
+done
+
+# Fallback: take first non-001 device
+if [ -z "$USB_DEVICE" ]; then
+    USB_DEVICE=$(ls /dev/bus/usb/*/* 2>/dev/null | grep -v '/001/001$' | head -1)
+fi
+
 if [ -z "$USB_DEVICE" ]; then
     echo "[ERROR] Printer not found. Is OTG cable connected?" | tee -a "$LOG"
     exit 1
@@ -230,7 +247,10 @@ fi
 
 # Start the IPP print server (handles USB via termux-usb)
 echo "[+] Starting IPP server on port 631..." | tee -a "$LOG"
-termux-usb -e "python $INSTALL_DIR/print_server.py" -r "$USB_DEVICE" 2>&1 | tee -a "$LOG"
+# NEW (permission first, then launch):
+termux-usb -r "$USB_DEVICE"
+sleep 2
+termux-usb -e "python $INSTALL_DIR/print_server.py" "$USB_DEVICE" 2>&1 | tee -a "$LOG"
 LAUNCHER
 
 chmod +x "$INSTALL_DIR/start.sh"
