@@ -278,7 +278,7 @@ if [ -z "$USB_DEVICE" ]; then
 fi
 log "Using USB device: $USB_DEVICE"
 
-WIFI_IP=$(ip addr show wlan0 2>/dev/null | grep 'inet ' | awk '{print $2}' | cut -d/ -f1)
+WIFI_IP=$(ip addr 2>/dev/null | awk '/inet / && !/127./ {print $2}' | cut -d/ -f1 | head -1)
 log "WiFi IP: ${WIFI_IP:-unknown}"
 
 # --- Start CUPS ---------------------------------------------------------------
@@ -353,7 +353,7 @@ chmod +x "$HOME/.termux/boot/canon-print.sh"
 
 # --- Done ---------------------------------------------------------------------
 
-WIFI_IP=$(ip addr show wlan0 2>/dev/null | grep 'inet ' | awk '{print $2}' | cut -d/ -f1)
+WIFI_IP=$(ip addr 2>/dev/null | awk '/inet / && !/127./ {print $2}' | cut -d/ -f1 | head -1)
 
 echo ""
 echo "============================================="
