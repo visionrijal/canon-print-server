@@ -193,64 +193,64 @@ EOF
 
 cat > "$INSTALL_DIR/start.sh" << 'LAUNCHER'
 #!/data/data/com.termux/files/usr/bin/bash
-# Start the Canon LBP2900B print server
-
 INSTALL_DIR="$HOME/canon-print-server"
 LOG="$INSTALL_DIR/server.log"
 
 echo "[$(date)] Starting Canon print server..." | tee -a "$LOG"
 
-# Find printer USB device
-# Find Canon printer (VendorID 04a9) specifically, skip root hub (001/001)
+# --- Find Canon printer (VendorID 04a9), skip root hub ---
 USB_DEVICE=""
 for dev in /dev/bus/usb/*/*; do
-    # Read idVendor from sysfs
     bus=$(echo "$dev" | awk -F/ '{print $5}')
-    devnum=$(echo "$dev" | awk -F/ '{print $6}')
     vendor=$(cat /sys/bus/usb/devices/usb${bus}/${bus}-*/idVendor 2>/dev/null | head -1)
     if [ "$vendor" = "04a9" ]; then
         USB_DEVICE="$dev"
         break
     fi
 done
-
-# Fallback: take first non-001 device
+# Fallback: first non-root-hub device
 if [ -z "$USB_DEVICE" ]; then
-    USB_DEVICE=$(ls /dev/bus/usb/*/* 2>/dev/null | grep -v '/001/001$' | head -1)
+    USB_DEVICE=$(ls /dev/bus/usb/*/* 2>/dev/null | grep -v '/001$' | head -1)
 fi
-
 if [ -z "$USB_DEVICE" ]; then
-    echo "[ERROR] Printer not found. Is OTG cable connected?" | tee -a "$LOG"
+    echo "[ERROR] Printer not found. Connect via OTG and retry." | tee -a "$LOG"
+    exit 1
+fi
+echo "[+] Using USB device: $USB_DEVICE" | tee -a "$LOG"
+
+# --- Start CUPS ---
+echo "[+] Starting CUPS..." | tee -a "$LOG"
+cupsd 2>&1 &
+sleep 3
+
+# Confirm CUPS is up
+if ! lpstat -H &>/dev/null; then
+    echo "[ERROR] CUPS failed to start. Run: cupsd -f" | tee -a "$LOG"
     exit 1
 fi
 
-echo "[+] Printer device: $USB_DEVICE" | tee -a "$LOG"
-echo "[+] WiFi IP: $(ip addr show wlan0 2>/dev/null | grep 'inet ' | awk '{print $2}' | cut -d/ -f1)" | tee -a "$LOG"
-
-# Start CUPS in background
-echo "[+] Starting CUPS..." | tee -a "$LOG"
-cupsd 2>&1 | tee -a "$LOG" &
-sleep 2
-
-# Add printer to CUPS if not already added
+# --- Register printer with CUPS (driverless, job receptor only) ---
 if ! lpstat -p LBP2900 &>/dev/null; then
     echo "[+] Adding LBP2900 to CUPS..." | tee -a "$LOG"
-    # Use termux-usb based backend
     lpadmin -p LBP2900 \
-        -P "$PREFIX/share/cups/model/Canon-LBP2900.ppd" \
-        -v "usb://Canon/LBP2900" \
+        -v "ipp://localhost:631/printers/LBP2900" \
+        -m everywhere \
         -E 2>&1 | tee -a "$LOG"
     lpadmin -d LBP2900 2>&1 | tee -a "$LOG"
     cupsaccept LBP2900 2>&1 | tee -a "$LOG"
     cupsenable LBP2900 2>&1 | tee -a "$LOG"
 fi
+lpstat -p LBP2900 | tee -a "$LOG"
 
-# Start the IPP print server (handles USB via termux-usb)
-echo "[+] Starting IPP server on port 631..." | tee -a "$LOG"
-# NEW (permission first, then launch):
+# --- Request USB permission then launch IPP server ---
+echo "[+] Requesting USB permission for $USB_DEVICE..." | tee -a "$LOG"
 termux-usb -r "$USB_DEVICE"
 sleep 2
+
+echo "[+] Starting IPP server on port 631..." | tee -a "$LOG"
 termux-usb -e "python $INSTALL_DIR/print_server.py" "$USB_DEVICE" 2>&1 | tee -a "$LOG"
+
+echo "[!] IPP server exited. Check: $LOG" | tee -a "$LOG"
 LAUNCHER
 
 chmod +x "$INSTALL_DIR/start.sh"
